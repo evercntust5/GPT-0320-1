@@ -1,0 +1,1701 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>SVVR 三層架構（分散 Hotspot + 大型閱讀面板）</title>
+  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+  <script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    #nameGate{
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.85);
+      display:flex; align-items:center; justify-content:center;
+      z-index:9999; padding:24px;
+      font-family:'Noto Sans TC',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:#fff;
+    }
+    #nameCard{
+      width:min(460px,100%);
+      background:rgba(20,20,20,0.92);
+      border-radius:14px;
+      padding:18px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.35);
+    }
+    #nameCard h2{ margin:0 0 10px; font-size:18px; }
+    #nameCard p{ margin:0 0 12px; font-size:13px; opacity:.9; line-height:1.5; }
+    #nameRow{ display:flex; gap:10px; }
+    #studentNameInput{
+      flex:1; font-size:16px; padding:10px 12px; border-radius:10px;
+      border:1px solid rgba(255,255,255,0.22); background:rgba(255,255,255,0.08);
+      color:#fff; outline:none;
+    }
+    #startBtn{
+      font-size:16px; padding:10px 14px; border-radius:10px; border:0;
+      background:#2f7cff; color:#fff; cursor:pointer; white-space:nowrap;
+    }
+    #hint{ margin-top:10px; font-size:12px; opacity:.75; }
+    #aiOverlay{
+      position:fixed; inset:0;
+      background:rgba(0,0,0,0.58);
+      display:none; align-items:center; justify-content:flex-end;
+      z-index:9998; padding:20px 28px;
+      font-family:'Noto Sans TC',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    }
+    #aiCard{
+      width:min(620px,92vw);
+      max-height:min(82vh,780px);
+      display:flex; flex-direction:column;
+      background:rgba(18,18,18,0.96);
+      border-radius:18px;
+      overflow:hidden;
+      box-shadow:0 14px 40px rgba(0,0,0,0.35);
+      color:#fff;
+    }
+    #aiHeader{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 16px; background:#2f7cff;
+    }
+    #aiHeader h3{ margin:0; font-size:18px; }
+    #aiCloseBtn{
+      border:0; background:#fff; color:#111; cursor:pointer;
+      border-radius:10px; padding:8px 12px; font-size:14px;
+    }
+    #aiMessages{
+      flex:1; overflow:auto; padding:14px;
+      background:rgba(255,255,255,0.03);
+    }
+    .ai-msg{ margin:0 0 12px; display:flex; }
+    .ai-msg.user{ justify-content:flex-end; }
+    .ai-msg .bubble{
+      max-width:min(86%,560px); padding:10px 12px; border-radius:14px;
+      line-height:1.6; font-size:14px; white-space:pre-wrap;
+    }
+    .ai-msg.user .bubble{ background:#2f7cff; color:#fff; }
+    .ai-msg.assistant .bubble{ background:rgba(255,255,255,0.12); color:#fff; }
+    #aiHint{
+      padding:10px 14px; font-size:12px; line-height:1.5; opacity:.82;
+      border-top:1px solid rgba(255,255,255,0.08);
+    }
+    #aiComposer{
+      display:flex; gap:10px; padding:14px;
+      border-top:1px solid rgba(255,255,255,0.08);
+      background:rgba(0,0,0,0.18);
+    }
+    #aiInput{
+      flex:1; min-height:92px; resize:vertical; border-radius:12px;
+      border:1px solid rgba(255,255,255,0.18); background:rgba(255,255,255,0.06);
+      color:#fff; padding:12px; font-size:15px; outline:none;
+    }
+    #aiSendBtn{
+      align-self:flex-end; border:0; background:#2f7cff; color:#fff;
+      border-radius:12px; padding:12px 16px; font-size:15px; cursor:pointer;
+    }
+    #aiSceneInputHost{
+      position:fixed;
+      left:8px; bottom:8px;
+      width:2px; height:2px;
+      overflow:hidden;
+      opacity:.01; pointer-events:none;
+      z-index:-1;
+    }
+    #aiSceneInput{
+      width:2px; height:2px;
+      opacity:.01;
+      resize:none;
+    }
+  </style>
+  <script>
+    const STORAGE_KEY_NAME  = 'svvr_student_name_v1';
+    const STORAGE_KEY_STATE = 'svvr_state_v1';
+    const AI_ENDPOINT = '/api/ask'; // Vercel 後端 ask.js 預設路徑
+    const TOPICS = {
+      t1: {
+        name: "Topic 1",
+        hubPano: "#pano_t1_hub",
+        objectives: [
+          "了解 Topic 1 的學習目標（示範）",
+          "能辨識 3 種代表性特徵（示範）"
+        ],
+        lessons: [
+          { id: "t1_l1", name: "A", pano: "#pano_t1_l1", hotspotsGroup: "#hotspots-t1_l1", totalHotspots: 5 },
+          { id: "t1_l2", name: "B", pano: "#pano_t1_l2", hotspotsGroup: "#hotspots-t1_l2", totalHotspots: 2 },
+          { id: "t1_l3", name: "C", pano: "#pano_t1_l3", hotspotsGroup: "#hotspots-t1_l3", totalHotspots: 2 },
+        ],
+        quiz: {
+          questions: [
+            { q: "非洲菫、黃金葛分別屬於哪一科？", options: ["苦苣苔科、天南星科", "莧科、蘭雪花科", "堇菜科、茜草科"], answer: 0, explain: "正確答案：苦苣苔科、天南星科" },
+            { q: "蘭科植物的主要特徵為何？", options: ["具雄、雌蕊合生而成的蕊柱", "花為肉穗花序", "花瓣為 4 的倍數"], answer: 0, explain: "正確答案：具雄、雌蕊合生而成的蕊柱" },
+          ]
+        }
+      },
+      t2: {
+        name: "Topic 2",
+        hubPano: "#pano_t2_hub",
+        objectives: ["（示範）目標 1", "（示範）目標 2"],
+        lessons: [
+          { id: "t2_l1", name: "D", pano: "#pano_t2_l1", hotspotsGroup: "#hotspots-t2_l1", totalHotspots: 2 },
+          { id: "t2_l2", name: "E", pano: "#pano_t2_l2", hotspotsGroup: "#hotspots-t2_l2", totalHotspots: 2 },
+          { id: "t2_l3", name: "F", pano: "#pano_t2_l3", hotspotsGroup: "#hotspots-t2_l3", totalHotspots: 4 },
+        ],
+        quiz: {
+          questions: [
+            { q: "何種植物又稱重陽木？", options: ["相思樹", "茄苳", "苦楝"], answer: 1, explain: "第 1 題正確答案：茄苳" },
+            { q: "下列何種植物屬於大喬木，不適合種植於混擬土花台中？", options: ["黃椰子", "緬梔", "榕樹"], answer: 2, explain: "第 2 題正確答案：榕樹" },
+          ]
+        }
+      },
+      t3: {
+        name: "Topic 3",
+        hubPano: "#pano_t3_hub",
+        objectives: ["（示範）目標 1", "（示範）目標 2"],
+        lessons: [
+          { id: "t3_l1", name: "G", pano: "#pano_t3_l1", hotspotsGroup: "#hotspots-t3_l1", totalHotspots: 2 },
+          { id: "t3_l2", name: "H", pano: "#pano_t3_l2", hotspotsGroup: "#hotspots-t3_l2", totalHotspots: 2 },
+          { id: "t3_l3", name: "I", pano: "#pano_t3_l3", hotspotsGroup: "#hotspots-t3_l3", totalHotspots: 2 },
+        ],
+        quiz: {
+          questions: [
+            { q: "何種植物又稱七里香？", options: ["月橘", "洋繡球", "朱槿"], answer: 0, explain: "第 1 題正確答案：月橘" },
+            { q: "何種植物又稱扶桑？", options: ["月橘", "洋繡球", "朱槿"], answer: 2, explain: "第 2 題正確答案：朱槿" },
+          ]
+        }
+      }
+    };
+    let state = {
+      version: 1,
+      current: { level: "topicMenu", topicId: null, lessonId: null, enteredAt: null },
+      progress: {},
+      progressSeen: {},
+      quiz: {},
+      quizRuntime: null,
+      logs: []
+    };
+    let hubProgressOpen = false;
+    let aiListening = false;
+    let aiRecognition = null;
+    let aiMicGranted = false;
+    let aiClosedUntil = 0;
+    function ensureAiState(){
+      state.ai ||= { messages: [] };
+      if (!Array.isArray(state.ai.messages)) state.ai.messages = [];
+    }
+    function escapeHtml(str=''){
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+    function compactText(str='', maxLen=120){
+      const clean = String(str || '').replace(/\s+/g, ' ').trim();
+      if (!clean) return '';
+      return clean.length > maxLen ? `${clean.slice(0, maxLen - 1)}…` : clean;
+    }
+    function wrapAiDisplayText(str=''){
+      return String(str || '')
+        .replace(/\s*([。！？；])/g, '$1\n')
+        .replace(/\n{2,}/g, '\n')
+        .trim();
+    }
+    function isAiScenePanelOpen(){
+      return !!qs('#aiScenePanel')?.getAttribute('visible');
+    }
+    function getActiveAiInput(){
+      const sceneInput = document.getElementById('aiSceneInput');
+      if (sceneInput && isAiScenePanelOpen()) return sceneInput;
+      return document.getElementById('aiInput') || sceneInput;
+    }
+    function showAiInlineComposer(){
+      openAiSceneTextEntry();
+    }
+    function hideAiInlineComposer(){}
+    function focusAiSceneInput(){
+      openAiSceneTextEntry();
+    }
+    function restoreVrUiFocus(){
+      try {
+        const scene = document.querySelector('a-scene');
+        scene?.canvas?.focus?.();
+        const cursorEl = document.querySelector('[cursor]');
+        cursorEl?.components?.raycaster?.refreshObjects?.();
+        scene?.renderer?.domElement?.focus?.();
+        window.dispatchEvent(new Event('resize'));
+      } catch(e) {}
+    }
+    function openAiSceneTextEntry(){
+      const input = document.getElementById('aiSceneInput');
+      if (!input) return;
+      const current = input.value || '';
+      let next = null;
+      try {
+        next = window.prompt('請輸入你想問 AI 助教的問題：', current);
+      } catch(e) {
+        next = null;
+      }
+      if (next === null) {
+        setTimeout(restoreVrUiFocus, 80);
+        return;
+      }
+      input.value = next;
+      syncAiInputValue(next);
+      renderAiSceneDraft();
+      const trimmed = (next || '').trim();
+      if (trimmed) {
+        logEvent('ai_text_confirm', {
+          topic_id: state?.current?.topicId || '',
+          scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu'),
+          selected_option: trimmed
+        });
+        setAiStatus('已收到文字，正在送出給 AI…');
+        setTimeout(() => { restoreVrUiFocus(); sendAiText(trimmed); }, 80);
+      } else {
+        setAiStatus('已清空輸入內容。');
+        setTimeout(restoreVrUiFocus, 80);
+      }
+    }
+    function renderAiSceneDraft(){
+      const raw = (document.getElementById('aiSceneInput')?.value || '').trim();
+      const hasText = !!raw;
+      const promptText = hasText ? `待送出：${compactText(raw, 26)}` : '語音輸入：按確定後自動送出';
+      setText('#aiSceneInputText', promptText);
+      const bg = qs('#aiSceneInputBg');
+      if (bg) bg.setAttribute('color', hasText ? '#1f2633' : '#151515');
+    }
+    function syncAiInputValue(value=''){
+      const a = document.getElementById('aiInput');
+      const b = document.getElementById('aiSceneInput');
+      if (a) a.value = value;
+      if (b) b.value = value;
+      renderAiSceneDraft();
+    }
+    function renderAiMessages(){
+      ensureAiState();
+      const wrap = document.getElementById('aiMessages');
+      if (wrap) {
+        if (!state.ai.messages.length) {
+          wrap.innerHTML = `<div class="ai-msg assistant"><div class="bubble">你好，我是 AI 助教。你可以在這裡輸入問題。
+目前這個版本已把 AI 對話按鈕加回來；如果尚未串接 API，我會先顯示前端測試回覆。</div></div>`;
+        } else {
+          wrap.innerHTML = state.ai.messages.map(msg => {
+            const role = msg.role === 'user' ? 'user' : 'assistant';
+            return `<div class="ai-msg ${role}"><div class="bubble">${escapeHtml(msg.text || '')}</div></div>`;
+          }).join('');
+          wrap.scrollTop = wrap.scrollHeight;
+        }
+      }
+      const voiceBtn = document.getElementById('aiVoiceBtn');
+      if (voiceBtn) voiceBtn.classList.toggle('listening', !!aiListening);
+      setText('#btnAiVoiceSceneLabel', aiListening ? '停止語音' : '語音輸入');
+      const hint = document.getElementById('aiHint');
+      const hintText = aiListening
+        ? '語音辨識中…請直接說話。若環境太吵，可改用文字輸入。按 <b>Ctrl / Cmd + Enter</b> 可快速送出。'
+        : '提示：此輸入框是噪音環境備用，也可按「語音輸入」。在部分手機 VR 全螢幕模式下若被系統隱藏，可先退出 VR 再輸入。按 <b>Ctrl / Cmd + Enter</b> 可快速送出。';
+      if (hint) hint.innerHTML = hintText;
+      renderAiScenePanel();
+      renderAiSceneDraft();
+    }
+    function renderAiScenePanel(){
+      const userTextEl = qs('#aiSceneUserText');
+      const aiTextEl = qs('#aiSceneReplyText');
+      if (!userTextEl || !aiTextEl) return;
+      ensureAiState();
+      const msgs = state.ai.messages || [];
+      const lastUser = [...msgs].reverse().find(msg => msg.role === 'user');
+      const lastAi = [...msgs].reverse().find(msg => msg.role === 'assistant');
+      const userText = lastUser ? compactText(lastUser.text, 28) : '尚未提問';
+      const aiText = lastAi ? wrapAiDisplayText(lastAi.text) : '你好，我是植物小幫手。\n可用下方按鈕提問。';
+      const isAiError = /AI\s*request\s*failed|AI\s*服務目前沒有連上|沒有連上/i.test(aiText);
+      const replyBg = qs('#aiSceneReplyBg');
+      if (replyBg) replyBg.setAttribute('color', isAiError ? '#5a4a00' : '#161616');
+      setText('#aiSceneUserText', userText);
+      setText('#aiSceneReplyText', aiText);
+      setAiStatus(aiListening ? '狀態：語音辨識中…' : '狀態：待命');
+    }
+    function setAiStatus(message='狀態：待命'){
+      setText('#aiSceneStatus', message || '狀態：待命');
+    }
+    function openAiDialog(){
+      if (Date.now() < aiClosedUntil) return;
+      ensureAiState();
+      const panel = qs('#aiScenePanel');
+      if (!panel) return;
+      placePanelInFront(panel, 1.42, -0.06);
+      panel.setAttribute('visible', true);
+      renderAiMessages();
+      renderAiSceneDraft();
+      if (state?.current?.lessonId) setLessonFocusMode(true);
+      updateUiLock();
+      logEvent('ai_open', {
+        topic_id: state?.current?.topicId || '',
+        scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
+      });
+    }
+    function closeAiDialog(){
+      const panel = qs('#aiScenePanel');
+      if (!panel || !panel.getAttribute('visible')) return;
+      stopVoiceInput(false);
+      aiClosedUntil = Date.now() + 1800;
+      panel.setAttribute('visible', false);
+      if (state?.current?.lessonId) setLessonFocusMode(false);
+      updateUiLock();
+      setTimeout(() => { aiClosedUntil = 0; }, 1850);
+      logEvent('ai_close', {
+        topic_id: state?.current?.topicId || '',
+        scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
+      });
+    }
+    async function ensureMicPermission(){
+      if (aiMicGranted) return true;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return true;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        try { stream.getTracks().forEach(t => t.stop()); } catch(e) {}
+        aiMicGranted = true;
+        return true;
+      } catch (err) {
+        return false;
+      }
+    }
+    async function startVoiceInput(){
+      const input = getActiveAiInput();
+      const micOk = await ensureMicPermission();
+      if (!micOk) {
+        syncAiInputValue('請先允許麥克風權限，才能使用語音輸入。');
+        renderAiMessages();
+        return;
+      }
+      const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Ctor) {
+        syncAiInputValue('你的裝置目前不支援語音辨識，請改用文字輸入。');
+        renderAiMessages();
+        return;
+      }
+      if (aiListening) return;
+      aiRecognition = new Ctor();
+      aiRecognition.lang = 'zh-TW';
+      aiRecognition.interimResults = true;
+      aiRecognition.maxAlternatives = 1;
+      aiRecognition.continuous = false;
+      aiListening = true;
+      renderAiMessages();
+      logEvent('ai_voice_start', {
+        topic_id: state?.current?.topicId || '',
+        scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
+      });
+      aiRecognition.onresult = (event) => {
+        const transcript = Array.from(event.results).map(r => r[0]?.transcript || '').join('').trim();
+        syncAiInputValue(transcript);
+        renderAiMessages();
+        if (event.results[event.results.length - 1]?.isFinal) {
+          logEvent('ai_voice_result', {
+            topic_id: state?.current?.topicId || '',
+            scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu'),
+            selected_option: transcript
+          });
+          sendAiText(transcript);
+        }
+      };
+      aiRecognition.onerror = () => {
+        aiListening = false;
+        renderAiMessages();
+        if (!(getActiveAiInput()?.value || '').trim()) syncAiInputValue('語音辨識失敗，請再試一次或改用文字輸入。');
+      };
+      aiRecognition.onend = () => {
+        aiListening = false;
+        renderAiMessages();
+      };
+      try { aiRecognition.start(); } catch (e) {
+        aiListening = false;
+        renderAiMessages();
+      }
+    }
+    function stopVoiceInput(render=true){
+      if (aiRecognition) {
+        try { aiRecognition.stop(); } catch (e) {}
+      }
+      aiListening = false;
+      if (render) renderAiMessages();
+    }
+    async function sendAiText(text){
+      ensureAiState();
+      text = (text || '').trim();
+      if (!text) return;
+      const input = getActiveAiInput();
+      if (input) input.value = '';
+      state.ai.messages.push({ role:'user', text, ts: nowTs() });
+      setAiStatus('狀態：AI 回應中…');
+      renderAiMessages();
+      saveState();
+      logEvent('ai_question', {
+        topic_id: state?.current?.topicId || '',
+        scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu'),
+        selected_option: text
+      });
+      let reply = 'AI 服務目前沒有連上，請檢查 /api/ask 與 OPENAI_API_KEY 是否已正確設定。';
+      if (AI_ENDPOINT) {
+        try {
+          const res = await fetch(AI_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question: text,
+              context: [
+                state?.current?.topicId ? `topicId: ${state.current.topicId}` : '',
+                state?.current?.lessonId ? `lessonId: ${state.current.lessonId}` : '',
+                localStorage.getItem(STORAGE_KEY_NAME) ? `studentName: ${localStorage.getItem(STORAGE_KEY_NAME)}` : ''
+              ].filter(Boolean).join(' | ')
+            })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data?.error || 'AI request failed');
+          reply = data.answer || data.reply || data.message || reply;
+        } catch (err) {
+          reply = `AI 服務目前沒有連上：${err.message || '請檢查 API 設定'}`;
+        }
+      }
+      state.ai.messages.push({ role:'assistant', text: reply, ts: nowTs() });
+      logEvent('ai_reply', {
+        topic_id: state?.current?.topicId || '',
+        scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu'),
+        selected_option: reply
+      });
+      saveState();
+      renderAiMessages();
+    }
+    async function sendAiMessage(){
+      const input = getActiveAiInput();
+      const text = (input?.value || '').trim();
+      return sendAiText(text);
+    }
+    function saveState(){
+      try { localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(state)); } catch(e){}
+    }
+    function loadState(){
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY_STATE);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') state = parsed;
+      } catch(e){}
+    }
+    function nowTs(){ return Date.now(); }
+    function formatLocalTime(ts){
+      const d = new Date(ts);
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      const h = String(d.getHours()).padStart(2,'0');
+      const min = String(d.getMinutes()).padStart(2,'0');
+      const s = String(d.getSeconds()).padStart(2,'0');
+      return `${y}-${m}-${day} ${h}:${min}:${s}`;
+    }
+    function currentSceneDuration(){
+      const enteredAt = state?.current?.enteredAt;
+      if (!enteredAt) return 0;
+      return Math.max(0, Number(((Date.now() - enteredAt) / 1000).toFixed(1)));
+    }
+    function setCurrentScene(level, topicId=null, lessonId=null){
+      state.current = { level, topicId, lessonId, enteredAt: nowTs() };
+    }
+    function buildLogEntry(type, extra={}){
+      const topicId = extra.topic_id ?? extra.topicId ?? state?.current?.topicId ?? '';
+      const sceneId = extra.scene_id ?? extra.sceneId ?? state?.current?.lessonId ?? (topicId ? `${topicId}_hub` : state?.current?.level || 'topic_menu');
+      const entry = {
+        time: formatLocalTime(nowTs()),
+        topic_id: topicId || '',
+        scene_id: sceneId || '',
+        event_type: type || '',
+        hotspot_id: extra.hotspot_id ?? extra.hotspotId ?? '',
+        button_id: extra.button_id ?? extra.buttonId ?? '',
+        question_id: extra.question_id ?? '',
+        selected_option: extra.selected_option ?? '',
+        correct_answer: extra.correct_answer ?? '',
+        is_correct: extra.is_correct ?? '',
+        duration_in_scene: extra.duration_in_scene ?? currentSceneDuration()
+      };
+      return entry;
+    }
+    function logEvent(type, extra={}){
+      state.logs.push(buildLogEntry(type, extra));
+      saveState();
+    }
+    function deriveButtonId(el, act, a='', b=''){
+      const explicit = el?.getAttribute?.('data-logid') || el?.id || '';
+      if (explicit) return explicit;
+      if (act === 'goHub') {
+        if (state?.current?.level === 'topicMenu') return `topic_${a}_btn`;
+        return `back_to_${a}_hub_btn`;
+      }
+      if (act === 'goLesson') return `lesson_${b}_btn`;
+      if (act === 'goTopicMenu') return 'back_to_topic_menu_btn';
+      if (act === 'downloadLog') return 'download_log_btn';
+      if (act === 'toggleProgress') return hubProgressOpen ? 'progress_close_btn' : 'progress_open_btn';
+      if (act === 'startQuiz') return `quiz_${a}_btn`;
+      if (act === 'chooseOpt') return `quiz_option_${Number(a)+1}_btn`;
+      if (act === 'nextQuiz') return 'quiz_next_submit_btn';
+      if (act === 'prevQuiz') return 'quiz_prev_btn';
+      if (act === 'openAI') return `open_ai_${state?.current?.lessonId || state?.current?.topicId || 'global'}_btn`;
+      if (act === 'closeAI') return 'close_ai_btn';
+      if (act === 'aiTextInput') return el?.id === 'aiSceneInputBg' ? 'ai_text_prompt_area' : 'ai_text_input_btn';
+      if (act === 'aiVoiceInput') return 'ai_voice_input_btn';
+      if (act === 'closeInfo') return 'info_close_btn';
+      return act ? `${act}_btn` : 'ui_btn';
+    }
+    function qs(sel){ return document.querySelector(sel); }
+    const RAYCAST_PARK_POS = '0 -999 5';
+    function parkForRaycast(sel, park){
+      const el = typeof sel === 'string' ? qs(sel) : sel;
+      if (!el) return;
+      if (!el.dataset.homePosition) {
+        const p = el.getAttribute('position');
+        if (p && typeof p === 'object') el.dataset.homePosition = `${p.x} ${p.y} ${p.z}`;
+        else el.dataset.homePosition = (p || '0 0 0');
+      }
+      el.setAttribute('position', park ? RAYCAST_PARK_POS : el.dataset.homePosition);
+    }
+    function setVisible(sel, visible){
+      const el = qs(sel);
+      if (!el) return;
+      el.setAttribute('visible', !!visible);
+    }
+    function setText(sel, value){
+      const el = qs(sel);
+      if (!el) return;
+      if (el.hasAttribute('troika-text')) {
+        el.setAttribute('troika-text', 'value', value);
+      } else {
+        el.setAttribute('text', 'value', value);
+      }
+    }
+    function isEntityVisible(sel){
+      const el = qs(sel);
+      return !!(el && el.getAttribute('visible'));
+    }
+    function isAnyOverlayOpen(){
+      return isEntityVisible('#infoPanel') || isEntityVisible('#hubProgressPanel') || isEntityVisible('#aiScenePanel');
+    }
+    function activeOverlayType(){
+      if (isEntityVisible('#infoPanel')) return 'info';
+      if (isEntityVisible('#hubProgressPanel')) return 'progress';
+      if (isEntityVisible('#aiScenePanel')) return 'ai';
+      return '';
+    }
+    function hideAllPages(){
+      ['#pageTopicMenu', '#pageHub', '#pageQuiz', '#pageLesson'].forEach(sel => {
+        setVisible(sel, false);
+        parkForRaycast(sel, true);
+      });
+      document.querySelectorAll('[id^="pageLesson-"]').forEach(el => {
+        el.setAttribute('visible', false);
+        parkForRaycast(el, true);
+      });
+    }
+    function hideAllHotspotGroups(){
+      for (const t of Object.values(TOPICS)) {
+        for (const lesson of t.lessons) {
+          setVisible(lesson.hotspotsGroup, false);
+          parkForRaycast(lesson.hotspotsGroup, true);
+        }
+      }
+    }
+    function setSky(srcSelector){
+      const sky = qs('#sky');
+      if (!sky) return;
+      sky.setAttribute('src', srcSelector);
+      sky.setAttribute('material', 'src', srcSelector);
+    }
+    function setHud(title){
+      const name = localStorage.getItem(STORAGE_KEY_NAME) || '未命名';
+      setText('#hudText', `${name}｜${title}`);
+    }
+    function setHudVisible(show){
+      const hud = qs('#hud');
+      if (!hud) return;
+      hud.setAttribute('visible', !!show);
+    }
+    function toggleHubProgress(force){
+      const panel = qs('#hubProgressPanel');
+      const backdrop = qs('#hubProgressBackdrop');
+      if (!panel) return;
+      const wasOpen = hubProgressOpen;
+      hubProgressOpen = (force !== undefined) ? !!force : !hubProgressOpen;
+      panel.setAttribute('visible', hubProgressOpen);
+      if (backdrop) backdrop.setAttribute('visible', hubProgressOpen);
+      setText('#hubQuizStatus', hubProgressOpen ? '選擇題：先關閉進度面板再開始' : (isTopicComplete(state.current.topicId) ? '選擇題：已解鎖' : '選擇題：完成所有單元後解鎖'));
+      if (hubProgressOpen !== wasOpen) {
+        logEvent(hubProgressOpen ? 'progress_open' : 'progress_close', {
+          topic_id: state?.current?.topicId || '',
+          scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
+        });
+      }
+      updateUiLock();
+    }
+    function setClickableLock(locked){
+      document.querySelectorAll('[data-hotspot="true"]').forEach(el => {
+        if (locked) el.classList.remove('clickable');
+        else el.classList.add('clickable');
+      });
+      document.querySelectorAll('[data-ui="true"]').forEach(el => {
+        if (locked) el.classList.remove('clickable');
+        else el.classList.add('clickable');
+      });
+      qs('#infoCloseBtn')?.classList.add('clickable');
+    }
+    function updateUiLock(){
+      const locked = isAnyOverlayOpen();
+      setClickableLock(locked);
+      if (!locked) return;
+      const t = activeOverlayType();
+      if (t === 'info') qs('#infoCloseBtn')?.classList.add('clickable');
+      if (t === 'progress') {
+        qs('#btnCloseProgress')?.classList.add('clickable');
+        qs('#btnOpenProgress')?.classList.add('clickable');
+      }
+      if (t === 'ai') {
+        qs('#btnCloseAiScene')?.classList.add('clickable');
+        qs('#btnAiTextScene')?.classList.add('clickable');
+        qs('#btnAiVoiceScene')?.classList.add('clickable');
+      }
+    }
+    function setLessonFocusMode(enabled){
+      const { lessonId } = state.current || {};
+      if (!lessonId) return;
+      const lessonPageSel = `#pageLesson-${lessonId}`;
+      const lessonPage = qs(lessonPageSel);
+      if (lessonPage) {
+        lessonPage.setAttribute('visible', !enabled);
+      }
+      let hotspotGroupSel = null;
+      for (const topic of Object.values(TOPICS)) {
+        const lesson = topic.lessons.find(x => x.id === lessonId);
+        if (lesson) {
+          hotspotGroupSel = lesson.hotspotsGroup;
+          break;
+        }
+      }
+      if (hotspotGroupSel) {
+        const hotspotGroup = qs(hotspotGroupSel);
+        if (hotspotGroup) hotspotGroup.setAttribute('visible', !enabled);
+      }
+    }
+    function closeInfoPanel(){
+      setVisible('#infoPanel', false);
+      setLessonFocusMode(false);
+      updateUiLock();
+    }
+    function closeProgressPanel(){
+      if (!hubProgressOpen) return;
+      toggleHubProgress(false);
+    }
+    function goTopicMenu(){
+      toggleHubProgress(false);
+      hideAllHotspotGroups();
+      setCurrentScene('topicMenu', null, null);
+      saveState();
+      closeInfoPanel();
+      hideAllPages();
+      setSky('#pano_topic_menu');
+      setHudVisible(false);
+      const studentName = localStorage.getItem(STORAGE_KEY_NAME) || 'Student';
+      setText('#topicMenuTitle', `${studentName}`);
+      parkForRaycast('#pageTopicMenu', false);
+      setVisible('#pageTopicMenu', true);
+      logEvent('nav_topic_menu', { scene_id: 'topic_menu' });
+    }
+    function initLessonProgress(lesson){
+      if (!state.progress[lesson.id]) {
+        state.progress[lesson.id] = {
+          doneHotspots: 0,
+          totalHotspots: lesson.totalHotspots || 5,
+          completed: false
+        };
+      } else {
+        state.progress[lesson.id].totalHotspots = lesson.totalHotspots || state.progress[lesson.id].totalHotspots || 5;
+      }
+      state.progressSeen ||= {};
+      state.progressSeen[lesson.id] ||= {};
+      saveState();
+    }
+    function isTopicComplete(topicId){
+      const topic = TOPICS[topicId];
+      if (!topic) return false;
+      for (const lesson of topic.lessons) {
+        initLessonProgress(lesson);
+        if (!state.progress[lesson.id]?.completed) return false;
+      }
+      return true;
+    }
+    function refreshHubUI(topicId){
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+      setText('#hubTitle', `${topic.name}`);
+      const lessonTitleMap = { t1: '#btnimg-topic1', t2: '#btnimg-topic2', t3: '#btnimg-topic3' };
+      const menuTitleImg = qs('#hubTitleImage');
+      if (menuTitleImg) menuTitleImg.setAttribute('src', lessonTitleMap[topicId] || '#btnimg-topic1');
+      setText('#hubObjectives', topic.objectives.map((o,i)=>`${i+1}. ${o}`).join('\n'));
+      setText('#hubProgressTopicTitle', '學習進度');
+      setText('#hubProgressTopicSub', '');
+      let completedCount = 0;
+      topic.lessons.forEach((lesson, idx) => {
+        initLessonProgress(lesson);
+        const p = state.progress[lesson.id];
+        const ratio = Math.max(0, Math.min(1, p.doneHotspots / p.totalHotspots));
+        const percent = Math.round(ratio * 100);
+        if (p.completed) completedCount += 1;
+        const lessonLabelMap = ['第一單元','第二單元','第三單元'];
+        setText(`#hubProgressRowLabel${idx+1}`, lessonLabelMap[idx] || `第${idx+1}單元`);
+        setText(`#hubProgressText${idx+1}`, `${percent}%`);
+        setText(`#hubProgressStatus${idx+1}`, p.completed ? '已完成' : `已完成 ${p.doneHotspots}/${p.totalHotspots}`);
+        updateProgressBar(`#hubBarFill${idx+1}`, ratio);
+      });
+      setText('#hubProgressSummary', '');
+      const unlocked = isTopicComplete(topicId);
+      setText('#hubQuizStatus', unlocked ? '選擇題：已解鎖' : '選擇題：完成所有單元後解鎖');
+      const quizState = state.quiz[topicId];
+      const quizBtn = qs('#btnStartQuiz');
+      if (quizBtn) {
+        const canOpen = unlocked;
+        quizBtn.setAttribute('opacity', canOpen ? '1' : '0.45');
+        quizBtn.setAttribute('data-enabled', canOpen ? 'true' : 'false');
+        quizBtn.setAttribute('src', (quizState && quizState.done) ? '#btnimg-ans' : '#btnimg-text');
+      }
+      setVisible('#hubQuizResultPanel', false);
+      setText('#hubQuizResultText', '');
+    }
+    function patchHubLessonButtons(topicId){
+      ['t1','t2','t3'].forEach(id => {
+        const active = id === topicId;
+        setVisible(`#hubLessonGroup-${id}`, active);
+        parkForRaycast(`#hubLessonGroup-${id}`, !active);
+      });
+      const quizBtn = qs('#btnStartQuiz');
+      if (quizBtn) quizBtn.setAttribute('ui-action', `action: startQuiz; a: ${topicId}`);
+    }
+    function goHub(topicId){
+      toggleHubProgress(false);
+      hideAllHotspotGroups();
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+      patchHubLessonButtons(topicId);
+      setCurrentScene('hub', topicId, null);
+      saveState();
+      closeInfoPanel();
+      hideAllPages();
+      setSky(topic.hubPano);
+      setHudVisible(false);
+      parkForRaycast('#pageHub', false);
+      setVisible('#pageHub', true);
+      refreshHubUI(topicId);
+      logEvent('nav_hub', { topic_id: topicId, scene_id: `${topicId}_hub` });
+    }
+    function goLesson(topicId, lessonId){
+      toggleHubProgress(false);
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+      const lesson = topic.lessons.find(x => x.id === lessonId);
+      if (!lesson) return;
+      setCurrentScene('lesson', topicId, lessonId);
+      saveState();
+      closeInfoPanel();
+      hideAllPages();
+      setSky(lesson.pano);
+      setHudVisible(false);
+      parkForRaycast(`#pageLesson-${lesson.id}`, false);
+      setVisible(`#pageLesson-${lesson.id}`, true);
+      hideAllHotspotGroups();
+      parkForRaycast(lesson.hotspotsGroup, false);
+      setVisible(lesson.hotspotsGroup, true);
+      initLessonProgress(lesson);
+      logEvent('nav_lesson', { topic_id: topicId, scene_id: lessonId });
+    }
+    function faceCameraYaw(panelEl){
+      const cam = qs('[camera]');
+      if (!panelEl || !cam || !window.THREE) return;
+      const panelPos = new THREE.Vector3();
+      const camPos = new THREE.Vector3();
+      panelEl.object3D.getWorldPosition(panelPos);
+      cam.object3D.getWorldPosition(camPos);
+      const dx = camPos.x - panelPos.x;
+      const dz = camPos.z - panelPos.z;
+      const yaw = Math.atan2(dx, dz) * (180 / Math.PI);
+      panelEl.setAttribute('rotation', `0 ${yaw} 0`);
+    }
+    function placePanelInFront(panelEl, distance = 1.55, yOffset = -0.18){
+      const cam = qs('[camera]');
+      if (!panelEl || !cam || !cam.object3D || !window.THREE) return;
+      const camPos = new THREE.Vector3();
+      const camDir = new THREE.Vector3();
+      cam.object3D.getWorldPosition(camPos);
+      cam.object3D.getWorldDirection(camDir);
+      camDir.y = 0;
+      if (camDir.lengthSq() < 0.0001) camDir.set(0, 0, -1);
+      camDir.normalize();
+      const target = camPos.clone().add(camDir.multiplyScalar(distance));
+      target.y = camPos.y + yOffset;
+      panelEl.setAttribute('position', `${target.x.toFixed(3)} ${target.y.toFixed(3)} ${target.z.toFixed(3)}`);
+      faceCameraYaw(panelEl);
+    }
+    function placePanelAtRight(panelEl, forward = 1.8, rightOffset = 1.0, yOffset = -0.05){
+      const cam = qs('[camera]');
+      if (!panelEl || !cam || !cam.object3D || !window.THREE) return;
+      const camPos = new THREE.Vector3();
+      const camDir = new THREE.Vector3();
+      cam.object3D.getWorldPosition(camPos);
+      cam.object3D.getWorldDirection(camDir);
+      camDir.y = 0;
+      if (camDir.lengthSq() < 0.0001) camDir.set(0, 0, -1);
+      camDir.normalize();
+      const right = new THREE.Vector3(camDir.z, 0, -camDir.x).normalize();
+      const target = camPos.clone()
+        .add(camDir.clone().multiplyScalar(forward))
+        .add(right.multiplyScalar(rightOffset));
+      target.y = camPos.y + yOffset;
+      panelEl.setAttribute('position', `${target.x.toFixed(3)} ${target.y.toFixed(3)} ${target.z.toFixed(3)}`);
+      faceCameraYaw(panelEl);
+    }
+    function updateProgressBar(fillSel, ratio, baseWidth = 1.88){
+      const fill = qs(fillSel);
+      if (!fill) return;
+      const safeRatio = Math.max(0, Math.min(1, ratio || 0));
+      const width = Math.max(0.001, Number((baseWidth * safeRatio).toFixed(4)));
+      const centerX = Number((-baseWidth / 2 + width / 2).toFixed(4));
+      fill.setAttribute('width', width);
+      fill.setAttribute('position', `${centerX} -0.02 0.01`);
+      fill.setAttribute('visible', safeRatio > 0);
+    }
+    function markHotspotDone(topicId, lessonId, hotspotId){
+      const topic = TOPICS[topicId];
+      if (!topic) return;
+      const lesson = topic.lessons.find(x => x.id === lessonId);
+      if (!lesson) return;
+      initLessonProgress(lesson);
+      const p = state.progress[lesson.id];
+      if (state.progressSeen?.[lesson.id]?.[hotspotId]) return;
+      state.progressSeen[lesson.id][hotspotId] = true;
+      p.doneHotspots = Math.min(p.totalHotspots, (p.doneHotspots || 0) + 1);
+      p.completed = (p.doneHotspots >= p.totalHotspots);
+      saveState();
+      logEvent('hotspot_open', { topic_id: topicId, scene_id: lessonId, hotspot_id: hotspotId, button_id: hotspotId });
+    }
+    
+    // 讓面板只做水平朝向鏡頭，避免整個 UI 傾斜變形
+    AFRAME.registerComponent('face-center', {
+      tick: function(){
+        if (!this.el || !this.el.object3D || !window.THREE) return;
+        const cam = document.querySelector('[camera]');
+        if (!cam || !cam.object3D) return;
+        const panelPos = new THREE.Vector3();
+        const camPos = new THREE.Vector3();
+        this.el.object3D.getWorldPosition(panelPos);
+        cam.object3D.getWorldPosition(camPos);
+        const dx = camPos.x - panelPos.x;
+        const dz = camPos.z - panelPos.z;
+        const yaw = Math.atan2(dx, dz) * (180 / Math.PI);
+        this.el.setAttribute('rotation', `0 ${yaw} 0`);
+      }
+    });
+AFRAME.registerComponent('hotspot-panel', {
+      schema: {
+        img: { type: 'selector' },
+        side: { default: 'right' },
+        distance: { default: 1.0 },
+        hid: { default: '' }
+      },
+      init: function(){
+        this.onClick = () => {
+          if (isAnyOverlayOpen()) return;
+          const panel = qs('#infoPanel');
+          const imgPlane = qs('#infoImage');
+          if (!panel || !imgPlane || !window.THREE) return;
+          const { topicId, lessonId } = state.current || {};
+          if (!topicId || !lessonId) return;
+          const hotspotId = this.data.hid || this.el.getAttribute('id') || ('hs_' + Math.random());
+          markHotspotDone(topicId, lessonId, hotspotId);
+          const imgEl = this.data.img;
+          if (imgEl) imgPlane.setAttribute('material', 'src', `#${imgEl.id}`);
+          const hotspotPos = new THREE.Vector3();
+          this.el.object3D.getWorldPosition(hotspotPos);
+          const cam = qs('[camera]');
+          const targetPos = hotspotPos.clone();
+          const d = this.data.distance || 1.0;
+          let offset = new THREE.Vector3(d * 0.34, -0.04, 0.18);
+          if (this.data.side === 'left') offset.set(-d * 0.34, -0.04, 0.18);
+          if (this.data.side === 'up') offset.set(0, d * 0.18, 0.18);
+          if (this.data.side === 'down') offset.set(0, -d * 0.20, 0.18);
+          targetPos.add(offset);
+          const p = targetPos.clone();
+          if (cam && cam.object3D){
+            const camPos = new THREE.Vector3();
+            cam.object3D.getWorldPosition(camPos);
+            const panelDir = new THREE.Vector3().subVectors(targetPos, camPos).normalize();
+            const fixedDistance = 1.28;
+            p.copy(camPos).add(panelDir.multiplyScalar(fixedDistance));
+          }
+          panel.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
+          panel.setAttribute('visible', true);
+          faceCameraYaw(panel);
+          setLessonFocusMode(true);
+          updateUiLock();
+        };
+        this.el.addEventListener('click', this.onClick);
+      },
+      remove: function(){
+        this.el.removeEventListener('click', this.onClick);
+      }
+    });
+    function showQuizAnswerImage(topicId){
+      const answerImg = qs('#quizAnswerImage');
+      if (!answerImg) return;
+      const srcMap = { t1: "#btnimg-ans1", t2: "#btnimg-ans2", t3: "#btnimg-ans3" };
+      answerImg.setAttribute('src', srcMap[topicId] || "#btnimg-ans");
+      answerImg.setAttribute('visible', true);
+    }
+    function hideQuizAnswerImage(){
+      const answerImg = qs('#quizAnswerImage');
+      if (!answerImg) return;
+      answerImg.setAttribute('visible', false);
+      answerImg.setAttribute('src', "#btnimg-ans");
+    }
+    function startQuiz(topicId){
+      toggleHubProgress(false);
+      hideAllHotspotGroups();
+      if (!isTopicComplete(topicId)) return;
+      if (state.quiz[topicId]?.done) return openQuizAnswers(topicId);
+      closeInfoPanel();
+      hideAllPages();
+      parkForRaycast('#pageQuiz', false);
+      setVisible('#pageQuiz', true);
+      setHudVisible(false);
+      hideQuizAnswerImage();
+      state.quizRuntime = { topicId, idx: 0, chosen: [], startedAt: nowTs(), submitted: false };
+      saveState();
+      renderQuizQuestion();
+      logEvent('quiz_start', { topic_id: topicId, scene_id: `${topicId}_quiz` });
+    }
+    function openQuizAnswers(topicId){
+      const saved = state.quiz[topicId];
+      const topic = TOPICS[topicId];
+      if (!saved || !topic) return;
+      logEvent('quiz_answer_open', {
+        topic_id: topicId,
+        scene_id: `${topicId}_quiz_answer`
+      });
+      toggleHubProgress(false);
+      hideAllHotspotGroups();
+      closeInfoPanel();
+      hideAllPages();
+      parkForRaycast('#pageQuiz', false);
+      setVisible('#pageQuiz', true);
+      setHudVisible(false);
+      setText('#quizQuestion', '');
+      setVisible('#quizQuestion', false);
+      setText('#quizResult', '');
+      setVisible('#quizResult', false);
+      for (let i=1;i<=3;i++){
+        const btn = qs(`#quizOptBtn${i}`);
+        const label = qs(`#quizOptText${i}`);
+        if (btn) btn.setAttribute('visible', false);
+        if (label) label.setAttribute('visible', false);
+      }
+      showQuizAnswerImage(topicId);
+      const nextBtn = qs('#quizNextBtn');
+      if (nextBtn) {
+        nextBtn.setAttribute('visible', true);
+        nextBtn.setAttribute('src', '#btnimg-back');
+      }
+      state.quizRuntime = { topicId, idx: 0, chosen: saved.answers ? saved.answers.slice() : [], startedAt: saved.ts || nowTs(), submitted: true };
+      saveState();
+    }
+    function renderQuizQuestion(){
+      const rt = state.quizRuntime;
+      if (!rt) return;
+      const topic = TOPICS[rt.topicId];
+      const qObj = topic.quiz.questions[rt.idx];
+      if (!qObj) return;
+      setVisible('#quizQuestion', true);
+      setText('#quizQuestion', `第 ${rt.idx+1} 題／${topic.quiz.questions.length} 題
+${qObj.q}`);
+      setText('#quizResult', '');
+      setVisible('#quizResult', false);
+      qObj.options.forEach((opt, i) => {
+        setText(`#quizOptText${i+1}`, opt);
+        const btn = qs(`#quizOptBtn${i+1}`);
+        if (btn) {
+          btn.setAttribute('visible', true);
+          btn.setAttribute('material', 'color', (rt.chosen[rt.idx] === i) ? '#2f7cff' : '#333');
+        }
+        const label = qs(`#quizOptText${i+1}`);
+        if (label) label.setAttribute('visible', true);
+      });
+      hideQuizAnswerImage();
+      const nextBtn = qs('#quizNextBtn');
+      if (nextBtn) {
+        nextBtn.setAttribute('visible', true);
+        nextBtn.setAttribute('src', (rt.idx < topic.quiz.questions.length-1) ? '#btnimg-next' : '#btnimg-ok');
+      }
+    }
+    function chooseOption(optIndex){
+      const rt = state.quizRuntime;
+      if (!rt || rt.submitted) return;
+      const topic = TOPICS[rt.topicId];
+      const qObj = topic.quiz.questions[rt.idx];
+      if (!qObj) return;
+      rt.chosen[rt.idx] = optIndex;
+      saveState();
+      for (let i=0;i<qObj.options.length;i++){
+        const btn = qs(`#quizOptBtn${i+1}`);
+        if (btn) btn.setAttribute('material', 'color', (i===optIndex) ? '#2f7cff' : '#333');
+      }
+      logEvent('quiz_choose', {
+        topic_id: rt.topicId,
+        scene_id: `${rt.topicId}_quiz`,
+        question_id: `q${rt.idx+1}`,
+        selected_option: qObj.options[optIndex] ?? optIndex
+      });
+    }
+    function prevQuiz(){ return; }
+    function nextOrSubmitQuiz(){
+      const rt = state.quizRuntime;
+      if (!rt) return;
+      const topic = TOPICS[rt.topicId];
+      const total = topic.quiz.questions.length;
+      if (rt.submitted){
+        setText('#quizQuestion', '');
+        setText('#quizResult', '');
+        setVisible('#quizResult', false);
+        hideQuizAnswerImage();
+        setVisible('#pageQuiz', false);
+        goHub(rt.topicId);
+        return;
+      }
+      if (rt.chosen[rt.idx] === undefined) return;
+      if (rt.idx < total-1){
+        rt.idx += 1;
+        saveState();
+        renderQuizQuestion();
+        return;
+      }
+      let score = 0;
+      const details = topic.quiz.questions.map((q, i) => {
+        const chosen = rt.chosen[i];
+        const correct = (chosen === q.answer);
+        if (correct) score += 1;
+        return { chosen, correct, explain: q.explain };
+      });
+      state.quiz[rt.topicId] = {
+        done: true,
+        score,
+        total,
+        answers: rt.chosen.slice(),
+        details,
+        ts: nowTs()
+      };
+      saveState();
+      topic.quiz.questions.forEach((q, i) => {
+        const chosenIndex = rt.chosen[i];
+        logEvent('quiz_submit', {
+          topic_id: rt.topicId,
+          scene_id: `${rt.topicId}_quiz`,
+          question_id: `q${i+1}`,
+          selected_option: q.options[chosenIndex] ?? '',
+          correct_answer: q.options[q.answer] ?? q.answer,
+          is_correct: chosenIndex === q.answer ? 'true' : 'false',
+          duration_in_scene: Number((((nowTs() - (rt.startedAt || nowTs())) / 1000)).toFixed(1))
+        });
+      });
+      setText('#quizQuestion', '');
+      setVisible('#quizQuestion', false);
+      setText('#quizResult', '');
+      setVisible('#quizResult', false);
+      for (let i=1;i<=3;i++){
+        const btn = qs(`#quizOptBtn${i}`);
+        const label = qs(`#quizOptText${i}`);
+        if (btn) btn.setAttribute('visible', false);
+        if (label) label.setAttribute('visible', false);
+      }
+      showQuizAnswerImage(rt.topicId);
+      const nextBtn = qs('#quizNextBtn');
+      if (nextBtn) {
+        nextBtn.setAttribute('visible', true);
+        nextBtn.setAttribute('src', '#btnimg-back');
+      }
+      rt.submitted = true;
+      state.quizRuntime = rt;
+      saveState();
+    }
+    function downloadLog(){
+      try{
+        const name = localStorage.getItem(STORAGE_KEY_NAME) || 'user';
+        logEvent('download_log', {
+          topic_id: state?.current?.topicId || '',
+          scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu')
+        });
+        const payload = JSON.stringify({ logs: state.logs, ai_messages: state.ai?.messages || [] }, null, 2);
+        const blob = new Blob([payload], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `svvr_log_${name}.json`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { try{ a.remove(); }catch(e){} }, 0);
+        URL.revokeObjectURL(url);
+      }catch(e){}
+    }
+    function bindAiSceneButtons(){
+      document.querySelectorAll('[ui-action*="action: openAI"], #btnCloseAiScene, #btnAiTextScene, #btnAiVoiceScene, #aiSceneInputBg').forEach(el => {
+        el.classList.add('clickable');
+      });
+    }
+    AFRAME.registerComponent('ui-action', {
+      schema: { action: {type:'string'}, a: {type:'string'}, b:{type:'string'} },
+      init: function(){
+        this.onClick = () => {
+          const act = this.data.action;
+          const buttonId = deriveButtonId(this.el, act, this.data.a, this.data.b);
+          const closers = ['closeInfo','toggleProgress'];
+          if (['closeAI','aiTextInput','aiVoiceInput'].includes(act) && !isEntityVisible('#aiScenePanel')) return;
+          if (isAnyOverlayOpen()) {
+            const overlay = activeOverlayType();
+            if (!(overlay === 'progress' && act === 'toggleProgress') && !(overlay === 'info' && act === 'closeInfo') && !(overlay === 'ai' && ['closeAI','aiTextInput','aiVoiceInput'].includes(act))) {
+              return;
+            }
+          }
+          logEvent('button_click', {
+            topic_id: state?.current?.topicId || this.data.a || '',
+            scene_id: state?.current?.lessonId || (state?.current?.topicId ? `${state.current.topicId}_hub` : 'topic_menu'),
+            button_id: buttonId
+          });
+          if (act === 'goTopicMenu') return goTopicMenu();
+          if (act === 'goHub')       return goHub(this.data.a);
+          if (act === 'goLesson')    return goLesson(this.data.a, this.data.b);
+          if (act === 'startQuiz') {
+            if (qs('#btnStartQuiz')?.getAttribute('data-enabled') !== 'true') return;
+            return startQuiz(this.data.a);
+          }
+          if (act === 'chooseOpt')   return chooseOption(parseInt(this.data.a,10));
+          if (act === 'prevQuiz')    return prevQuiz();
+          if (act === 'nextQuiz')    return nextOrSubmitQuiz();
+          if (act === 'closeInfo')   return closeInfoPanel();
+          if (act === 'downloadLog') return downloadLog();
+          if (act === 'toggleProgress') return toggleHubProgress();
+          if (act === 'openAI') { if (Date.now() < aiClosedUntil) return; return openAiDialog(); }
+          if (act === 'closeAI')        return closeAiDialog();
+          if (act === 'aiTextInput') {
+            focusAiSceneInput();
+            return;
+          }
+          if (act === 'aiVoiceInput')   return aiListening ? stopVoiceInput() : startVoiceInput();
+        };
+        this.el.addEventListener('click', this.onClick);
+      },
+      remove: function(){
+        this.el.removeEventListener('click', this.onClick);
+      }
+    });
+    
+    // =========================
+    window.addEventListener('DOMContentLoaded', () => {
+      loadState();
+      const gate  = document.getElementById('nameGate');
+      const input = document.getElementById('studentNameInput');
+      const btn   = document.getElementById('startBtn');
+      const savedName = localStorage.getItem(STORAGE_KEY_NAME) || '';
+      gate.style.display = 'flex';
+      if (input) input.value = savedName;
+      setTimeout(() => input && input.focus(), 50);
+      function start(){
+        const name = (input?.value || '').trim();
+        if (!name) { input && input.focus(); return; }
+        localStorage.setItem(STORAGE_KEY_NAME, name);
+        gate.style.display = 'none';
+        goTopicMenu();
+      }
+      btn?.addEventListener('click', start);
+      input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
+      ensureAiState();
+      renderAiMessages();
+      bindAiSceneButtons();
+      document.getElementById('aiCloseBtn')?.addEventListener('click', closeAiDialog);
+      document.getElementById('aiVoiceBtn')?.addEventListener('click', () => {
+        if (aiListening) stopVoiceInput();
+        else startVoiceInput();
+      });
+      document.getElementById('aiInput')?.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendAiMessage();
+      });
+      document.getElementById('aiSceneInput')?.addEventListener('input', renderAiSceneDraft);
+      document.getElementById('aiSceneInput')?.addEventListener('focus', renderAiSceneDraft);
+      document.getElementById('aiSceneInput')?.addEventListener('blur', renderAiSceneDraft);
+      document.getElementById('aiSceneInput')?.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendAiMessage();
+      });
+    });
+  </script>
+</head>
+<body style="margin:0; background:#000;">
+  <div id="nameGate" style="display:none;">
+    <div id="nameCard">
+      <h2>請輸入姓名</h2>
+      <p>用於學習紀錄與介面顯示。完成後即可開始操作（凝視停留 <b>1.5 秒</b> 即可點選）。</p>
+      <div id="nameRow">
+        <input id="studentNameInput" placeholder="輸入名字..." autocomplete="name" />
+        <button id="startBtn">開始體驗</button>
+      </div>
+      <div id="hint">提示：狀態會存於 localStorage，避免 iOS 偶發重整導致進度丟失。</div>
+    </div>
+  </div>
+  <div id="aiOverlay" style="display:none; pointer-events:none;">
+    <div id="aiCard">
+      <div id="aiHeader">
+        <h3>AI 對話</h3>
+        <button id="aiCloseBtn">關閉</button>
+      </div>
+      <div id="aiMessages"></div>
+      <div id="aiHint">提示：此輸入框是噪音環境備用。在部分手機 VR 全螢幕模式下若被系統隱藏，可先退出 VR 再打字送出。按 <b>Ctrl / Cmd + Enter</b> 可快速送出。</div>
+      <div id="aiComposer">
+        <textarea id="aiInput" placeholder="輸入你想問 AI 助教的問題..."></textarea>
+        <button id="aiVoiceBtn">語音輸入</button>
+              </div>
+    </div>
+  </div>
+  <div id="aiSceneInputHost" aria-hidden="true">
+    <textarea id="aiSceneInput" placeholder="直接在這裡輸入你想問 AI 助教的問題..."></textarea>
+  </div>
+  <a-scene renderer="colorManagement: true; physicallyCorrectLights: false" vr-mode-ui="enabled: true">
+    <a-assets>
+      <img id="pano_topic_menu" src="pano/topic_menu.jpg" crossorigin="anonymous">
+      <img id="pano_t1_hub" src="pano/t1_hub.jpg" crossorigin="anonymous">
+      <img id="pano_t1_l1"  src="pano/t1_l1.jpg" crossorigin="anonymous">
+      <img id="pano_t1_l2"  src="pano/t1_l2.jpg" crossorigin="anonymous">
+      <img id="pano_t1_l3"  src="pano/t1_l3.jpg" crossorigin="anonymous">
+      <img id="pano_t2_hub" src="pano/t2_hub.jpg" crossorigin="anonymous">
+      <img id="pano_t2_l1"  src="pano/t2_l1.jpg" crossorigin="anonymous">
+      <img id="pano_t2_l2"  src="pano/t2_l2.jpg" crossorigin="anonymous">
+      <img id="pano_t2_l3"  src="pano/t2_l3.jpg" crossorigin="anonymous">
+      <img id="pano_t3_hub" src="pano/t3_hub.jpg" crossorigin="anonymous">
+      <img id="pano_t3_l1"  src="pano/t3_l1.jpg" crossorigin="anonymous">
+      <img id="pano_t3_l2"  src="pano/t3_l2.jpg" crossorigin="anonymous">
+      <img id="pano_t3_l3"  src="pano/t3_l3.jpg" crossorigin="anonymous">
+      <!-- 骨架保留占位圖；你後續若不用圖片，也不影響 hotspot 本身是黃色球體 -->
+      <img id="info_placeholder" src="info/placeholder.png" crossorigin="anonymous">
+      <img id="info-1" src="info/1.jpg" crossorigin="anonymous">
+      <img id="info-2" src="info/2.jpg" crossorigin="anonymous">
+      <img id="info-3" src="info/3.jpg" crossorigin="anonymous">
+      <img id="info-4" src="info/4.jpg" crossorigin="anonymous">
+      <img id="info-5" src="info/5.jpg" crossorigin="anonymous">
+      <img id="info-6" src="info/6.jpg" crossorigin="anonymous">
+      <img id="info-7" src="info/7.jpg" crossorigin="anonymous">
+      <img id="info-8" src="info/8.jpg" crossorigin="anonymous">
+      <img id="info-9" src="info/9.jpg" crossorigin="anonymous">
+      <img id="info-10" src="info/10.jpg" crossorigin="anonymous">
+      <img id="info-11" src="info/11.jpg" crossorigin="anonymous">
+      <img id="info-12" src="info/12.jpg" crossorigin="anonymous">
+      <img id="info-13" src="info/13.jpg" crossorigin="anonymous">
+      <img id="info-14" src="info/14.jpg" crossorigin="anonymous">
+      <img id="info-15" src="info/15.jpg" crossorigin="anonymous">
+      <img id="info-16" src="info/16.jpg" crossorigin="anonymous">
+      <img id="info-17" src="info/17.jpg" crossorigin="anonymous">
+      <img id="info-18" src="info/18.jpg" crossorigin="anonymous">
+      <img id="info-19" src="info/19.jpg" crossorigin="anonymous">
+      <img id="info-20" src="info/20.jpg" crossorigin="anonymous">
+      <img id="info-21" src="info/21.jpg" crossorigin="anonymous">
+      <img id="info-22" src="info/22.jpg" crossorigin="anonymous">
+      <img id="info-23" src="info/23.jpg" crossorigin="anonymous">
+      <!-- button images -->
+      <img id="btnimg-back" src="buttonpic/back.jpg" crossorigin="anonymous">
+      <img id="btnimg-backtomenu" src="buttonpic/backtomenu.jpg" crossorigin="anonymous">
+      <img id="btnimg-before" src="buttonpic/before.jpg" crossorigin="anonymous">
+      <img id="btnimg-download" src="buttonpic/download.jpg" crossorigin="anonymous">
+      <img id="btnimg-lesson1" src="buttonpic/lesson1.jpg" crossorigin="anonymous">
+      <img id="btnimg-one" src="buttonpic/one.jpg" crossorigin="anonymous">
+      <img id="btnimg-lesson2" src="buttonpic/lesson2.jpg" crossorigin="anonymous">
+      <img id="btnimg-two" src="buttonpic/two.jpg" crossorigin="anonymous">
+      <img id="btnimg-lesson3" src="buttonpic/lesson3.jpg" crossorigin="anonymous">
+      <img id="btnimg-three" src="buttonpic/three.jpg" crossorigin="anonymous">
+      <img id="btnimg-menu" src="buttonpic/menu.jpg" crossorigin="anonymous">
+      <img id="btnimg-next" src="buttonpic/next.jpg" crossorigin="anonymous">
+      <img id="btnimg-ok" src="buttonpic/ok.jpg" crossorigin="anonymous">
+      <img id="btnimg-progress" src="buttonpic/progress.jpg" crossorigin="anonymous">
+      <img id="btnimg-talk" src="buttonpic/talk.jpg" crossorigin="anonymous">
+      <img id="btnimg-word" src="buttonpic/word.jpg" crossorigin="anonymous">
+      <img id="btnimg-speak" src="buttonpic/speak.jpg" crossorigin="anonymous">
+      <img id="btnimg-text" src="buttonpic/text.jpg" crossorigin="anonymous">
+      <img id="btnimg-ans" src="buttonpic/ans.jpg" crossorigin="anonymous">
+      <img id="btnimg-ans1" src="buttonpic/ans1.jpg" crossorigin="anonymous">
+      <img id="btnimg-ans2" src="buttonpic/ans2.jpg" crossorigin="anonymous">
+      <img id="btnimg-ans3" src="buttonpic/ans3.jpg" crossorigin="anonymous">
+      <img id="btnimg-topic1" src="buttonpic/topic1.jpg" crossorigin="anonymous">
+      <img id="btnimg-topic2" src="buttonpic/topic2.jpg" crossorigin="anonymous">
+      <img id="btnimg-topic3" src="buttonpic/topic3.jpg" crossorigin="anonymous">
+      <img id="btnimg-1-1" src="buttonpic/1-1.jpg" crossorigin="anonymous">
+      <img id="btnimg-1-2" src="buttonpic/1-2.jpg" crossorigin="anonymous">
+      <img id="btnimg-1-3" src="buttonpic/1-3.jpg" crossorigin="anonymous">
+      <img id="btnimg-2-1" src="buttonpic/2-1.jpg" crossorigin="anonymous">
+      <img id="btnimg-2-2" src="buttonpic/2-2.jpg" crossorigin="anonymous">
+      <img id="btnimg-2-3" src="buttonpic/2-3.jpg" crossorigin="anonymous">
+      <img id="btnimg-3-1" src="buttonpic/3-1.jpg" crossorigin="anonymous">
+      <img id="btnimg-3-2" src="buttonpic/3-2.jpg" crossorigin="anonymous">
+      <img id="btnimg-3-3" src="buttonpic/3-3.jpg" crossorigin="anonymous">
+    </a-assets>
+    <a-sky id="sky" radius="10" src="#pano_topic_menu"></a-sky>
+    <a-entity id="hud" position="0 1.75 -1.2">
+      <a-entity id="hudText"
+        troika-text="value: ; align: center; color:#FFFFFF; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.10; maxWidth:1.9"
+        position="0 0 0">
+      </a-entity>
+    </a-entity>
+    <!-- Page: Topic Menu -->
+    <a-entity id="pageTopicMenu" visible="true" position="0 1.28 -2.0">
+      <a-plane width="0.95" height="0.22" material="shader: flat; color: #111; opacity: 0.0"></a-plane>
+      <a-image id="topicMenuTitleImage" src="#btnimg-menu" width="0.70" height="0.42" position="0 0.20 0.02" visible="true"></a-image>
+      <a-plane id="topicMenuStudentBg" width="0.72" height="0.16" color="#000" material="shader: flat; opacity: 0.82" position="0 -0.10 0.021"></a-plane>
+      <a-entity id="topicMenuTitle"
+                troika-text="value: ; align: center; color:#fff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.11; maxWidth:0.62"
+                position="0 -0.10 0.03"></a-entity>
+      <a-image data-ui="true" class="clickable" ui-action="action: goHub; a: t1"
+               src="#btnimg-one" width="0.96" height="0.36"
+               position="-1.18 -0.66 0.12"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: goHub; a: t2"
+               src="#btnimg-two" width="0.96" height="0.36"
+               position="0 -0.66 0.12"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: goHub; a: t3"
+               src="#btnimg-three" width="0.96" height="0.36"
+               position="1.18 -0.66 0.12"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: downloadLog"
+               src="#btnimg-download" width="0.80" height="0.30"
+               position="0 1.16 0.36"></a-image>
+    </a-entity>
+    <!-- Page: Hub -->
+    <a-entity id="pageHub" visible="false" position="0 1.05 -2.05">
+      <a-image data-ui="true" class="clickable" ui-action="action: goTopicMenu"
+               src="#btnimg-backtomenu" width="0.80" height="0.30"
+               position="-0.86 0.72 0.05"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnOpenProgress" ui-action="action: toggleProgress"
+               src="#btnimg-progress" width="0.80" height="0.30"
+               position="0.62 0.72 0.05"></a-image>
+      <a-image id="hubTitleImage" src="#btnimg-topic1" width="0.70" height="0.42" position="0 0.22 0.02"></a-image>
+      <a-entity id="hubTitle" troika-text="value: ; align: center; color:#fff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.001; maxWidth:0.01"
+                position="0 -99 0"></a-entity>
+      <a-entity id="hubObjectives" visible="false" troika-text="value: ; align: left; color:#fff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.08; maxWidth:1.8; lineHeight:1.3"
+                position="-0.95 0.03 0.01"></a-entity>
+      <a-entity id="hubLessonGroup-t1" visible="true">
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t1; b: t1_l1"
+                 src="#btnimg-lesson1" width="0.96" height="0.36" position="-1.10 -0.52 0.06"></a-image>
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t1; b: t1_l2"
+                 src="#btnimg-lesson2" width="0.96" height="0.36" position="0 -0.52 0.06"></a-image>
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t1; b: t1_l3"
+                 src="#btnimg-lesson3" width="0.96" height="0.36" position="1.10 -0.52 0.06"></a-image>
+      </a-entity>
+      <a-entity id="hubLessonGroup-t2" visible="false">
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t2; b: t2_l1"
+                 src="#btnimg-lesson1" width="0.96" height="0.36" position="-1.10 -0.52 0.06"></a-image>
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t2; b: t2_l2"
+                 src="#btnimg-lesson2" width="0.96" height="0.36" position="0 -0.52 0.06"></a-image>
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t2; b: t2_l3"
+                 src="#btnimg-lesson3" width="0.96" height="0.36" position="1.10 -0.52 0.06"></a-image>
+      </a-entity>
+      <a-entity id="hubLessonGroup-t3" visible="false">
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t3; b: t3_l1"
+                 src="#btnimg-lesson1" width="0.96" height="0.36" position="-1.10 -0.52 0.06"></a-image>
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t3; b: t3_l2"
+                 src="#btnimg-lesson2" width="0.96" height="0.36" position="0 -0.52 0.06"></a-image>
+        <a-image data-ui="true" class="clickable" ui-action="action: goLesson; a: t3; b: t3_l3"
+                 src="#btnimg-lesson3" width="0.96" height="0.36" position="1.10 -0.52 0.06"></a-image>
+      </a-entity>
+      <a-entity id="hubQuizStatus" text="value: ; align: center; width: 2.2; color:#fff"
+                position="0 -1.08 0.01"></a-entity>
+      <a-image data-ui="true" class="clickable" id="btnStartQuiz"
+               ui-action="action: startQuiz; a: t1"
+               src="#btnimg-text" width="0.80" height="0.30"
+               position="-0.50 -1.24 0.05"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnHubAI" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.58 -1.24 0.05"></a-image>
+      <a-entity id="hubQuizResultPanel" visible="false" position="0 -2.25 0">
+        <a-plane width="2.2" height="0.92" material="shader: flat; color:#111; opacity:0.92"></a-plane>
+        <a-entity id="hubQuizResultText" text="value: ; align: left; width: 2.0; color:#fff; wrapCount: 30; baseline: top"
+                  position="-0.98 0.40 0.01"></a-entity>
+      </a-entity>
+      <a-entity id="hubProgressBackdrop" visible="false" position="0 0.00 0.03"></a-entity>
+      <a-entity id="hubProgressPanel" visible="false" position="2.95 0.08 0.55" scale="0.88 0.88 0.88" face-center>
+        <a-plane width="3.20" height="1.75" position="0 -0.15 0.00" material="shader: flat; color:#ffffff; opacity:1"></a-plane>
+        <a-plane width="3.20" height="0.24" position="0 0.7 0.01" material="shader: flat; color:#3b82f6; opacity:1"></a-plane>
+        <a-entity id="hubProgressTopicTitle" troika-text="value: ; align: center; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.13; maxWidth:2.2"
+                  position="0 0.48 0.02"></a-entity>
+        <a-entity id="hubProgressTopicSub" troika-text="value: ; align: center; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.01; maxWidth:0.01"
+                  position="0 0.35 0.02"></a-entity>
+        <a-entity position="0 0.16 0.02">
+          <a-entity id="hubProgressRowLabel1" troika-text="value: 第1單元; align: left; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.08; maxWidth:0.9" position="-1.18 -0.02 0.01"></a-entity>
+          <a-entity id="hubProgressStatus1" troika-text="value: ; align: right; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.07; maxWidth:1.0" position="1.18 -0.02 0.01"></a-entity>
+          <a-plane width="1.88" height="0.11" position="0 -0.02 0" material="shader: flat; color:#d9d9d9; opacity:0.98"></a-plane>
+          <a-plane id="hubBarFill1" width="1.88" height="0.11" position="-0.94 -0.02 0.01" visible="false" material="shader: flat; color:#7bdc6c; opacity:0.98"></a-plane>
+          <a-entity id="hubProgressText1" troika-text="value: 0%; align: center; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.07; maxWidth:0.4" position="0 -0.02 0.02"></a-entity>
+        </a-entity>
+        <a-entity position="0 -0.24 0.02">
+          <a-entity id="hubProgressRowLabel2" troika-text="value: 第2單元; align: left; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.08; maxWidth:0.9" position="-1.18 -0.02 0.01"></a-entity>
+          <a-entity id="hubProgressStatus2" troika-text="value: ; align: right; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.07; maxWidth:1.0" position="1.18 -0.02 0.01"></a-entity>
+          <a-plane width="1.88" height="0.11" position="0 -0.02 0" material="shader: flat; color:#d9d9d9; opacity:0.98"></a-plane>
+          <a-plane id="hubBarFill2" width="1.88" height="0.11" position="-0.94 -0.02 0.01" visible="false" material="shader: flat; color:#7bdc6c; opacity:0.98"></a-plane>
+          <a-entity id="hubProgressText2" troika-text="value: 0%; align: center; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.07; maxWidth:0.4" position="0 -0.02 0.02"></a-entity>
+        </a-entity>
+        <a-entity position="0 -0.64 0.02">
+          <a-entity id="hubProgressRowLabel3" troika-text="value: 第3單元; align: left; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.08; maxWidth:0.9" position="-1.18 -0.02 0.01"></a-entity>
+          <a-entity id="hubProgressStatus3" troika-text="value: ; align: right; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.07; maxWidth:1.0" position="1.18 -0.02 0.01"></a-entity>
+          <a-plane width="1.88" height="0.11" position="0 -0.02 0" material="shader: flat; color:#d9d9d9; opacity:0.98"></a-plane>
+          <a-plane id="hubBarFill3" width="1.88" height="0.11" position="-0.94 -0.02 0.01" visible="false" material="shader: flat; color:#7bdc6c; opacity:0.98"></a-plane>
+          <a-entity id="hubProgressText3" troika-text="value: 0%; align: center; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.07; maxWidth:0.4" position="0 -0.02 0.02"></a-entity>
+        </a-entity>
+        <a-entity id="hubProgressSummary" troika-text="value: ; align: center; color:#111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.01; maxWidth:0.01" position="0 -0.88 0.02" visible="false"></a-entity>
+        <a-box data-ui="true" class="clickable" id="btnCloseProgress" ui-action="action: toggleProgress" position="0 -1.22 0.02" scale="0.95 0.22 0.08" color="#ffffff"></a-box>
+        <a-entity data-ui="true"
+                  troika-text="value: X; align: center; color:#111111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.10; maxWidth:0.2" position="0 -1.22 0.07"></a-entity>
+      </a-entity>
+    </a-entity>
+    <!-- Pages: Lessons（每個 lesson 都是獨立場景頁） -->
+    <a-entity id="pageLesson-t1_l1" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-1-1" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t1_l1"
+               ui-action="action: goHub; a: t1" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t1_l2" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-1-2" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t1_l2"
+               ui-action="action: goHub; a: t1" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t1_l3" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-1-3" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t1_l3"
+               ui-action="action: goHub; a: t1" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t2_l1" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-2-1" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t2_l1"
+               ui-action="action: goHub; a: t2" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t2_l2" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-2-2" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t2_l2"
+               ui-action="action: goHub; a: t2" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t2_l3" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-2-3" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t2_l3"
+               ui-action="action: goHub; a: t2" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t3_l1" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-3-1" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t3_l1"
+               ui-action="action: goHub; a: t3" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t3_l2" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-3-2" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t3_l2"
+               ui-action="action: goHub; a: t3" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <a-entity id="pageLesson-t3_l3" visible="false" position="0 1.12 -2.0">
+      <a-image src="#btnimg-3-3" width="0.70" height="0.42"
+               position="0 0.04 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnBackToHub-t3_l3"
+               ui-action="action: goHub; a: t3" src="#btnimg-back"
+               width="0.80" height="0.30" position="0 -0.54 -0.01"></a-image>
+      <a-image data-ui="true" class="clickable" ui-action="action: openAI"
+               src="#btnimg-talk" width="0.80" height="0.30"
+               position="0.98 -0.54 0.05"></a-image>
+    </a-entity>
+    <!-- Page: Quiz -->
+    <a-entity id="pageQuiz" visible="false" position="0 1.86 -2.0">
+      <a-plane width="4.05" height="2.55" position="0 -0.62 0" material="shader: flat; color: #111; opacity: 0.90"></a-plane>
+      <a-entity id="quizQuestion" troika-text="value: ; align: center; color:#fff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.128; maxWidth:3.28; lineHeight:1.22"
+                position="0 -0.10 0.03"></a-entity>
+      <a-box data-ui="true" class="clickable" id="quizOptBtn1" ui-action="action: chooseOpt; a: 0"
+             position="-1.22 -0.90 0.02" scale="0.94 0.34 0.1" color="#333"></a-box>
+      <a-entity id="quizOptText1" troika-text="value: ; align: center; color:#fff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.085; maxWidth:0.86; lineHeight:1.15"
+                position="-1.22 -0.90 0.08"></a-entity>
+      <a-box data-ui="true" class="clickable" id="quizOptBtn2" ui-action="action: chooseOpt; a: 1"
+             position="0 -0.90 0.02" scale="0.94 0.34 0.1" color="#333"></a-box>
+      <a-entity id="quizOptText2" troika-text="value: ; align: center; color:#fff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.085; maxWidth:0.86; lineHeight:1.15"
+                position="0 -0.90 0.08"></a-entity>
+      <a-box data-ui="true" class="clickable" id="quizOptBtn3" ui-action="action: chooseOpt; a: 2"
+             position="1.22 -0.90 0.02" scale="0.94 0.34 0.1" color="#333"></a-box>
+      <a-entity id="quizOptText3" troika-text="value: ; align: center; color:#fff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.085; maxWidth:0.86; lineHeight:1.15"
+                position="1.22 -0.90 0.08"></a-entity>
+      <a-image id="quizAnswerImage" visible="false" src="#btnimg-ans1" width="2.70" height="1.62" position="0 -0.60 0.05"></a-image>
+      <a-entity id="quizResult" troika-text="value: ; align: center; color:#ffe9a8; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.084; maxWidth:2.7; lineHeight:1.25"
+                visible="false" position="0 -0.72 0.03"></a-entity>
+      <a-image data-ui="true" class="clickable" id="quizNextBtn" ui-action="action: nextQuiz"
+               src="#btnimg-next" width="0.80" height="0.30" position="0 -1.66 0.06"></a-image>
+    </a-entity>
+    <!-- AI 場景內固定面板 -->
+    <a-entity id="aiScenePanel" visible="false" position="00 1.18 -1.58" scale="0.82 0.82 0.82" face-center>
+      <a-plane width="3.45" height="2.00" material="shader: flat; color:#0b0b0b; opacity:0.96"></a-plane>
+      <a-plane width="3.45" height="0.28" position="0 0.86 0.01" material="shader: flat; color:#2f7cff; opacity:1"></a-plane>
+      <a-entity troika-text="value: 小幫手AI對話; align: left; color:#ffffff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.13; maxWidth:1.2"
+                position="-1.20 0.82 0.02"></a-entity>
+      <a-entity troika-text="value: 你的問題; align: left; color:#8fb5ff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.060; maxWidth:0.7"
+                position="-1.30 0.49 0.03"></a-entity>
+      <a-plane width="2.90" height="0.24" position="0 0.31 0.01" material="shader: flat; color:#172131; opacity:0.98"></a-plane>
+      <a-entity id="aiSceneUserText" troika-text="value: 尚未提問; align: center; anchorX: center; color:#ffffff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.074; maxWidth:2.18; lineHeight:1.08; whiteSpace:pre-wrap; overflowWrap:anywhere"
+                position="0 0.30 0.03"></a-entity>
+      <a-entity troika-text="value: 植物小幫手回覆; align: left; color:#8fb5ff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.060; maxWidth:0.7"
+                position="-1.23 0.11 0.03"></a-entity>
+      <a-plane id="aiSceneReplyBg" width="2.90" height="0.56" position="0 -0.22 0.01" material="shader: flat; color:#161616; opacity:0.98"></a-plane>
+      <a-entity id="aiSceneReplyText" troika-text="value: 你好，我是植物小幫手AI。\n可用下方按鈕提問。; align: center; anchorX: center; color:#ffffff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.072; maxWidth:2.18; lineHeight:1.20; whiteSpace:pre-wrap; overflowWrap:anywhere"
+                position="0 -0.20 0.03"></a-entity>
+      <a-entity id="aiSceneStatus" troika-text="value: 狀態：待命; align: center; anchorX: center; color:#ffe9a8; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.070; maxWidth:2.6"
+                position="0 -0.54 0.03"></a-entity>
+      <a-plane data-ui="true" class="clickable" id="aiSceneInputBg" ui-action="action: aiTextInput" width="2.90" height="0.20" position="0 -0.66 0.02" material="shader: flat; color:#151515; opacity:0.98"></a-plane>
+      <a-entity id="aiSceneInputText" troika-text="value: 語音輸入會自動送出; align: center; anchorX: center; color:#dfe8ff; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.067; maxWidth:2.32; lineHeight:1.08; whiteSpace:pre-wrap; overflowWrap:anywhere"
+                position="0 -0.63 0.03"></a-entity>
+      <a-image data-ui="true" class="clickable" id="btnAiTextScene" ui-action="action: aiTextInput"
+               src="#btnimg-word" width="0.80" height="0.30" position="-0.82 -0.87 0.05"></a-image>
+      <a-image data-ui="true" class="clickable" id="btnAiVoiceScene" ui-action="action: aiVoiceInput"
+               src="#btnimg-speak" width="0.80" height="0.30" position="0.12 -0.87 0.05"></a-image>
+      <a-box data-ui="true" class="clickable" id="btnCloseAiScene" ui-action="action: closeAI" position="1.00 -0.87 0.02" scale="0.56 0.20 0.08" color="#ffffff"></a-box>
+      <a-entity data-ui="true" troika-text="value: X; align: center; color:#111111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.080; maxWidth:0.36" position="1.00 -0.87 0.07"></a-entity>
+    </a-entity>
+    <!-- 大型閱讀面板 -->
+    <a-entity id="infoPanel" visible="false" position="0 0 0.18">
+      <a-plane width="2.76" height="1.76" material="shader: flat; color: #111; opacity: 0.96"></a-plane>
+      <a-plane id="infoImage" width="2.46" height="1.38" position="0 0.08 0.01"
+               material="shader: flat; transparent: true; src: #info_placeholder"></a-plane>
+      <a-box data-ui="true" class="clickable" id="infoCloseBtn" ui-action="action: closeInfo"
+             position="0 -0.76 0.02" scale="0.84 0.20 0.08" color="#ffffff"></a-box>
+      <a-entity data-ui="true"
+                troika-text="value: X; align: center; color:#111111; font:https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf; fontSize:0.10; maxWidth:0.2"
+                position="0 -0.76 0.07"></a-entity>
+    </a-entity>
+    <!-- Hotspots：全部黃色球體，位置分散（含後方），距離拉大 -->
+    <!-- Topic1 -->
+    <a-entity id="hotspots-t1_l1" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.2 1.27 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-1; side: right; distance: 1.4; hid: t1_l1_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="2 1 -2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-2; side: left; distance: 1.4; hid: t1_l1_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.4 1.12 2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-3; side: right; distance: 1.4; hid: t1_l1_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="2.3 1.1 2.4" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-4; side: left; distance: 1.4; hid: t1_l1_h4"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.32 3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-5; side: down; distance: 1.4; hid: t1_l1_h5"></a-sphere>
+    </a-entity>
+    <a-entity id="hotspots-t1_l2" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.5 1.15 -2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-6; side: right; distance: 1.4; hid: t1_l2_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.15 3.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-7; side: down; distance: 1.4; hid: t1_l2_h2"></a-sphere>
+    </a-entity>
+    <a-entity id="hotspots-t1_l3" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.1 1 -2.5" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-8; side: right; distance: 1.4; hid: t1_l3_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.35 2.9" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-9; side: down; distance: 1.4; hid: t1_l3_h2"></a-sphere>
+    </a-entity>
+    <!-- Topic2 -->
+    <a-entity id="hotspots-t2_l1" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.2 1.25 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-10; side: right; distance: 1.4; hid: t2_l1_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.32 3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-11; side: down; distance: 1.4; hid: t2_l1_h2"></a-sphere>
+    </a-entity>
+    <a-entity id="hotspots-t2_l2" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.2 1.25 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-12; side: right; distance: 1.4; hid: t2_l2_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.32 3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-13; side: down; distance: 1.4; hid: t2_l2_h2"></a-sphere>
+    </a-entity>
+    <a-entity id="hotspots-t2_l3" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.2 1.25 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-14; side: right; distance: 1.4; hid: t2_l3_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.4 1.1 2.1" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-15; side: right; distance: 1.4; hid: t2_l3_h2"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="2.3 1.12 2.3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-16; side: left; distance: 1.4; hid: t2_l3_h3"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.32 3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-17; side: down; distance: 1.4; hid: t2_l3_h4"></a-sphere>
+    </a-entity>
+    <!-- Topic3 -->
+    <a-entity id="hotspots-t3_l1" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.2 1.25 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-18; side: right; distance: 1.4; hid: t3_l1_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.32 3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-19; side: down; distance: 1.4; hid: t3_l1_h2"></a-sphere>
+    </a-entity>
+    <a-entity id="hotspots-t3_l2" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.2 1.25 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-20; side: right; distance: 1.4; hid: t3_l2_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.32 3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-21; side: down; distance: 1.4; hid: t3_l2_h2"></a-sphere>
+    </a-entity>
+    <a-entity id="hotspots-t3_l3" visible="false">
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="-2.2 1.25 -2.2" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-22; side: right; distance: 1.4; hid: t3_l3_h1"></a-sphere>
+      <a-sphere data-hotspot="true" class="clickable" radius="0.40" position="0 1.32 3" material="shader: flat; color:#FFD54F"
+                hotspot-panel="img: #info-23; side: down; distance: 1.4; hid: t3_l3_h2"></a-sphere>
+    </a-entity>
+    
+    <!-- =========================
+    <!-- Gaze cursor 3s -->
+    <a-entity id="rig">
+      <a-camera position="0 1.6 0" wasd-controls-enabled="false">
+        <a-cursor fuse="true" fuse-timeout="1500"
+          raycaster="objects: .clickable"
+          material="color: red; shader: flat"
+          geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.017"
+          animation__fusing="property: geometry.radiusInner; from: 0.01; to: 0.001; dur: 1500; startEvents: fusing"
+          animation__reset="property: geometry.radiusInner; to: 0.01; dur: 120; startEvents: mouseleave">
+        </a-cursor>
+      </a-camera>
+    </a-entity>
+    <script>
+      setHudVisible(false);
+      setText('#topicMenuTitle', '');
+    </script>
+  </a-scene>
+</body>
+</html>
